@@ -5,7 +5,7 @@ stock_data = yf.download('AAPL', start='2015-01-01', end='2023-12-31')
 print(stock_data.head())
 
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler 
 
 # Extract the 'Close' prices
 data = stock_data[['Close']]
