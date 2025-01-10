@@ -1,76 +1,89 @@
+# after feature 2:
 import yfinance as yf
-
-# Fetch stock data
-stock_data = yf.download('AAPL', start='2015-01-01', end='2023-12-31')
-print(stock_data.head())
-
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler 
-
-# Extract the 'Close' prices
-data = stock_data[['Close']]
-
-# Scale the data
-scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(data)
-
-# Prepare training and testing datasets
-train_size = int(len(scaled_data) * 0.8)
-train_data = scaled_data[:train_size]
-test_data = scaled_data[train_size:]
-
 import numpy as np
-
-def create_sequences(data, seq_length=60):
-    X, y = [], []
-    for i in range(seq_length, len(data)):
-        X.append(data[i-seq_length:i, 0])  # Past 60 days
-        y.append(data[i, 0])              # Next day's price
-    return np.array(X), np.array(y)
-
-X_train, y_train = create_sequences(train_data)
-X_test, y_test = create_sequences(test_data)
-
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-
-# Build the LSTM model
-model = Sequential([
-    LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)),
-    Dropout(0.2),
-    LSTM(50, return_sequences=False),
-    Dropout(0.2),
-    Dense(25),
-    Dense(1)
-])
-
-# Compile the model
-model.compile(optimizer='adam', loss='mean_squared_error')
-
-# Train the model
-model.fit(X_train, y_train, batch_size=32, epochs=50)
-
-# Reshape data for prediction
-X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
-X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
-
-# Predict
-predictions = model.predict(X_test)
-predictions = scaler.inverse_transform(predictions)  # Rescale back to original range
-
-# Compare with actual prices
-y_test = scaler.inverse_transform(y_test.reshape(-1, 1))
-
-# Visualization
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-plt.figure(figsize=(12, 6))
-plt.plot(stock_data.index[train_size + 60:], y_test, color='blue', label='Actual Prices')
-plt.plot(stock_data.index[train_size + 60:], predictions, color='red', label='Predicted Prices')
-plt.title('Stock Price Prediction')
-plt.xlabel('Date')
-plt.ylabel('Stock Price')
-plt.legend()
-plt.show()
+# Step 1: Download historical stock data
+def get_stock_data(ticker, start_date, end_date):
+    stock_data = yf.download(ticker, start=start_date, end=end_date)
+    return stock_data
 
+# Step 2: Perform Exploratory Data Analysis (EDA)
+def plot_stock_price(stock_data):
+    plt.figure(figsize=(10, 6))
+    plt.plot(stock_data['Close'], label='Close Price')
+    plt.title('Stock Price Over Time')
+    plt.xlabel('Date')
+    plt.ylabel('Price (USD)')
+    plt.legend()
+    plt.show()
 
+# Step 3: Feature Engineering
+def add_features(stock_data):
+    stock_data['MA_50'] = stock_data['Close'].rolling(window=50).mean()
+    stock_data['MA_200'] = stock_data['Close'].rolling(window=200).mean()  # Add 200-day moving average
+    stock_data['EMA_20'] = stock_data['Close'].ewm(span=20, adjust=False).mean()  # Add 20-day exponential moving average
+    stock_data['Daily_Return'] = stock_data['Close'].pct_change()
+    stock_data['Volatility'] = stock_data['Daily_Return'].rolling(window=20).std()  # Add 20-day volatility
+    stock_data = stock_data.dropna()  # Drop rows with NaN values
+    return stock_data
+
+# Step 4: Prepare data for training
+def prepare_data(stock_data):
+    features = stock_data[['Open', 'High', 'Low', 'Volume', 'MA_50', 'MA_200', 'EMA_20', 'Volatility']]
+    target = stock_data['Close']
+    X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42)
+    return X_train, X_test, y_train, y_test
+
+# Step 5: Perform hyperparameter tuning
+def hyperparameter_tuning(X_train, y_train):
+    param_grid = {
+        'alpha': [0.01, 0.1, 1, 10, 100]
+    }
+    ridge = Ridge()
+    grid_search = GridSearchCV(ridge, param_grid, cv=5, scoring='neg_mean_squared_error')
+    grid_search.fit(X_train, y_train)
+    print(f'Best Parameters: {grid_search.best_params_}')
+    best_model = grid_search.best_estimator_
+    return best_model
+
+# Step 6: Train and evaluate the model
+def train_and_evaluate(X_train, X_test, y_train, y_test):
+    model = hyperparameter_tuning(X_train, y_train)
+    y_pred = model.predict(X_test)
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    r2 = model.score(X_test, y_test)
+    print(f'MAE: {mae}, RMSE: {rmse}, R^2: {r2}')
+    return model, y_pred
+
+# Step 7: Visualize predictions
+def plot_predictions(y_test, y_pred):
+    plt.figure(figsize=(10, 6))
+    plt.plot(y_test.values, label='Actual Prices')
+    plt.plot(y_pred, label='Predicted Prices')
+    plt.title('Actual vs Predicted Prices')
+    plt.xlabel('Time Step')
+    plt.ylabel('Price (USD)')
+    plt.legend()
+    plt.show()
+
+# Main function
+def main():
+    ticker = 'AAPL'
+    start_date = '2015-01-01'
+    end_date = '2025-01-01'
+
+    stock_data = get_stock_data(ticker, start_date, end_date)
+    plot_stock_price(stock_data)
+    stock_data = add_features(stock_data)
+    X_train, X_test, y_train, y_test = prepare_data(stock_data)
+    model, y_pred = train_and_evaluate(X_train, X_test, y_train, y_test)
+    plot_predictions(y_test, y_pred)
+
+if __name__ == '__main__':
+    main()
